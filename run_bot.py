@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 DATA_DIR = "Data"
 SIGNALS_FILE = f"{DATA_DIR}/paper_signals.csv"
+FILTERED_SIGNALS_FILE = f"{DATA_DIR}/paper_signals_to_trade.csv"
 SUMMARY_FILE = f"{DATA_DIR}/multi_backtest_summary.csv"
 NEWS_FILE = f"{DATA_DIR}/news_candidates.csv"
 TRADED_FILE = f"{DATA_DIR}/traded_today.json"
@@ -33,9 +34,15 @@ DEFAULT_CHECK_SECONDS = 60
 load_dotenv()
 
 
-def run_step(name, script):
+def run_step(name, script, extra_env=None):
     print(f"\n===== Running {name} =====")
-    result = subprocess.run([sys.executable, script], text=True)
+    env = os.environ.copy()
+
+    if extra_env:
+        env.update(extra_env)
+
+    print(f"Using Python: {sys.executable}")
+    result = subprocess.run([sys.executable, script], text=True, env=env)
 
     if result.returncode != 0:
         print(f"\nStopped: {script} failed.")
@@ -80,6 +87,12 @@ def print_proposed_trades(buy_signals):
     ]
     available_columns = [column for column in columns if column in buy_signals.columns]
     print(buy_signals[available_columns].to_string(index=False))
+
+
+def save_filtered_trade_signals(new_buy_signals):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    new_buy_signals.to_csv(FILTERED_SIGNALS_FILE, index=False)
+    print(f"\nSaved filtered trade signals to {FILTERED_SIGNALS_FILE}")
 
 
 def market_is_open():
@@ -191,7 +204,8 @@ def run_manual_mode():
         print("Trade step cancelled.")
         return
 
-    run_step(*TRADE_STEP)
+    save_filtered_trade_signals(buy_signals)
+    run_step(*TRADE_STEP, extra_env={"SIGNALS_FILE": FILTERED_SIGNALS_FILE})
     print("\nBot pipeline finished.")
 
 
@@ -224,8 +238,9 @@ def run_auto_mode(check_seconds):
 
             if not new_buy_signals.empty:
                 print_proposed_trades(new_buy_signals)
+                save_filtered_trade_signals(new_buy_signals)
                 print("\nAUTO mode enabled. Submitting paper trades to Alpaca.")
-                run_step(*TRADE_STEP)
+                run_step(*TRADE_STEP, extra_env={"SIGNALS_FILE": FILTERED_SIGNALS_FILE})
 
                 if "ticker" in new_buy_signals.columns:
                     traded_tickers.update(new_buy_signals["ticker"].dropna().astype(str).tolist())

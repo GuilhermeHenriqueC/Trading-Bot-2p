@@ -17,7 +17,8 @@ ALLOW_FRACTIONAL = False
 
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0.02"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.02"))
-PRICE_BUFFER = 0.01
+PRICE_BUFFER = 0.03
+MAX_ORDER_RETRIES = 2
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
@@ -91,18 +92,23 @@ def get_latest_asset_price(client, ticker, fallback_price):
     return round(float(fallback_price), 2)
 
 
-def calculate_bracket_prices(entry_price):
+def calculate_bracket_prices(entry_price, retry_number=0):
+    adjusted_buffer = PRICE_BUFFER + (retry_number * 0.02)
+
     take_profit_price = round(entry_price * (1 + TAKE_PROFIT_PCT), 2)
     stop_loss_price = round(entry_price * (1 - STOP_LOSS_PCT), 2)
 
-    minimum_take_profit = round(entry_price + PRICE_BUFFER, 2)
-    maximum_stop_loss = round(entry_price - PRICE_BUFFER, 2)
+    minimum_take_profit = round(entry_price + adjusted_buffer, 2)
+    maximum_stop_loss = round(entry_price - adjusted_buffer, 2)
 
     if take_profit_price < minimum_take_profit:
         take_profit_price = minimum_take_profit
 
-    if stop_loss_price >= entry_price:
+    if stop_loss_price >= maximum_stop_loss:
         stop_loss_price = maximum_stop_loss
+
+    if stop_loss_price <= 0:
+        stop_loss_price = round(max(entry_price * 0.95, 0.01), 2)
 
     return take_profit_price, stop_loss_price
 
@@ -114,8 +120,6 @@ def submit_bracket_order(client, row):
 
     if current_price is None:
         return
-
-    take_profit_price, stop_loss_price = calculate_bracket_prices(current_price)
 
     if already_has_position(client, ticker):
         print(f"Skipping {ticker}: already has open position.")
@@ -137,25 +141,38 @@ def submit_bracket_order(client, row):
         print(f"Skipping {ticker}: price too high for ${trade_dollars} allocation.")
         return
 
-    order_data = MarketOrderRequest(
-        symbol=ticker,
-        qty=qty,
-        side=OrderSide.BUY,
-        time_in_force=TimeInForce.DAY,
-        order_class=OrderClass.BRACKET,
-        take_profit=TakeProfitRequest(limit_price=take_profit_price),
-        stop_loss=StopLossRequest(stop_price=stop_loss_price),
-    )
+    order = None
+    take_profit_price = None
+    stop_loss_price = None
 
-    try:
-        order = client.submit_order(order_data)
-    except Exception as error:
-        print(f"Failed to submit order for {ticker}:", error)
-        print("Signal price:", signal_price)
-        print("Order price used:", current_price)
-        print("Take profit used:", take_profit_price)
-        print("Stop loss used:", stop_loss_price)
-        return
+    for retry_number in range(MAX_ORDER_RETRIES):
+        take_profit_price, stop_loss_price = calculate_bracket_prices(current_price, retry_number)
+
+        order_data = MarketOrderRequest(
+            symbol=ticker,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+            order_class=OrderClass.BRACKET,
+            take_profit=TakeProfitRequest(limit_price=take_profit_price),
+            stop_loss=StopLossRequest(stop_price=stop_loss_price),
+        )
+
+        try:
+            order = client.submit_order(order_data)
+            break
+        except Exception as error:
+            print(f"Failed to submit order for {ticker} on attempt {retry_number + 1}:", error)
+            print("Signal price:", signal_price)
+            print("Order price used:", current_price)
+            print("Take profit used:", take_profit_price)
+            print("Stop loss used:", stop_loss_price)
+
+            if retry_number == MAX_ORDER_RETRIES - 1:
+                return
+
+            current_price = round(current_price + 0.03, 2)
+            print("Retrying with safer estimated base price:", current_price)
 
     print(f"Submitted paper bracket order for {ticker}")
     print("Order ID:", order.id)
