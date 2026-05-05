@@ -131,22 +131,34 @@ def run_manual_mode():
 def run_auto_mode(check_seconds):
     run_pre_trade_steps()
     wait_until_market_open(check_seconds)
+    traded_tickers = set()
 
     while market_is_open():
         buy_signals = run_signal_check()
 
         if not buy_signals.empty:
-            print_proposed_trades(buy_signals)
-            print("\nAUTO mode enabled. Submitting paper trades to Alpaca.")
-            run_step(*TRADE_STEP)
-            print("\nBot pipeline finished.")
-            return
+            if "ticker" in buy_signals.columns:
+                new_buy_signals = buy_signals[~buy_signals["ticker"].isin(traded_tickers)]
+            else:
+                new_buy_signals = buy_signals
+
+            if not new_buy_signals.empty:
+                print_proposed_trades(new_buy_signals)
+                print("\nAUTO mode enabled. Submitting paper trades to Alpaca.")
+                run_step(*TRADE_STEP)
+
+                if "ticker" in new_buy_signals.columns:
+                    traded_tickers.update(new_buy_signals["ticker"].dropna().astype(str).tolist())
+
+                print("\nTrade step finished. Bot will keep checking until market close.")
+            else:
+                print("\nBUY signals found, but all matching tickers were already traded in this session.")
 
         now = datetime.now(MARKET_TZ)
-        print(f"\nNo BUY signals yet. Current New York time: {now:%Y-%m-%d %H:%M:%S}. Checking again in {check_seconds} seconds.")
+        print(f"\nCurrent New York time: {now:%Y-%m-%d %H:%M:%S}. Checking again in {check_seconds} seconds.")
         time.sleep(check_seconds)
 
-    print("\nMarket closed before a BUY signal appeared. Trade step skipped.")
+    print("\nMarket closed. Auto mode stopped.")
 
 
 def main():
