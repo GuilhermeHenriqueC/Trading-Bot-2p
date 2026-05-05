@@ -1,0 +1,11 @@
+pandas>=2.2.0
+numpy>=1.26.0
+requests
+python-dotenv
+yfinance
+alpaca-trade-api
+google-generativeai
+beautifulsoup4
+lxml
+tqdm
+pytz
