@@ -38,12 +38,12 @@ GEMINI_FALLBACK_MODELS = [
 ]
 
 ENABLE_MOVER_CANDIDATES = True
-TOP_MOVER_LIMIT = 10
+TOP_MOVER_LIMIT = 15
 MIN_YESTERDAY_RETURN = 0.02
 MIN_WEEK_RETURN = 0.04
 
 YAHOO_SCREENER_URL = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
-YAHOO_GAINERS_COUNT = 100
+YAHOO_GAINERS_COUNT = 50
 YAHOO_GAINERS_SCR_IDS = [
     "day_gainers",
     "small_cap_gainers",

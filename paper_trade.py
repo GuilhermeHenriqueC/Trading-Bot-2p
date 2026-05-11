@@ -1,4 +1,6 @@
 import os
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 import pandas as pd
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
@@ -14,6 +16,10 @@ ACCOUNT_PERCENTAGE_PER_TRADE = 0.95
 MAX_DOLLARS_PER_TRADE = 1000
 MIN_CASH_BUFFER = 25
 ALLOW_FRACTIONAL = False
+
+NY_TIMEZONE = ZoneInfo("America/New_York")
+FORCE_SELL_BEFORE_CLOSE = True
+FORCE_SELL_TIME = time(15, 55)
 
 TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", "0.02"))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "0.02"))
@@ -113,6 +119,54 @@ def calculate_bracket_prices(entry_price, retry_number=0):
     return take_profit_price, stop_loss_price
 
 
+# --- Force sell before close logic ---
+
+def should_force_sell_before_close():
+    if not FORCE_SELL_BEFORE_CLOSE:
+        return False
+
+    now = datetime.now(NY_TIMEZONE).time()
+    return now >= FORCE_SELL_TIME
+
+
+def cancel_open_orders(client):
+    try:
+        client.cancel_orders()
+        print("Cancelled all open orders before force selling.")
+    except Exception as error:
+        print("Could not cancel open orders before force selling:", error)
+
+
+def sell_all_open_positions(client):
+    positions = client.get_all_positions()
+
+    if not positions:
+        print("No open positions to sell before close.")
+        return
+
+    cancel_open_orders(client)
+
+    for position in positions:
+        symbol = position.symbol
+        qty = abs(float(position.qty))
+
+        if qty <= 0:
+            continue
+
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        )
+
+        try:
+            order = client.submit_order(order_data)
+            print(f"Submitted close-time market sell for {symbol}, qty {qty}. Order ID: {order.id}")
+        except Exception as error:
+            print(f"Failed to submit close-time sell for {symbol}:", error)
+
+
 def submit_bracket_order(client, row):
     ticker = str(row["ticker"])
     signal_price = float(row["current_price"])
@@ -186,12 +240,6 @@ def submit_bracket_order(client, row):
 
 
 def main():
-    buy_signals = load_buy_signals()
-
-    if buy_signals.empty:
-        print("No BUY signals found. Nothing to trade.")
-        return
-
     client = get_client()
     account = client.get_account()
 
@@ -201,6 +249,17 @@ def main():
     print("Account percentage per trade:", ACCOUNT_PERCENTAGE_PER_TRADE)
     print("Fixed max dollars per trade:", MAX_DOLLARS_PER_TRADE)
     print("Minimum cash buffer:", MIN_CASH_BUFFER)
+
+    if should_force_sell_before_close():
+        print("Market close approaching. Selling all open positions.")
+        sell_all_open_positions(client)
+        return
+
+    buy_signals = load_buy_signals()
+
+    if buy_signals.empty:
+        print("No BUY signals found. Nothing to trade.")
+        return
 
     for _, row in buy_signals.iterrows():
         submit_bracket_order(client, row)

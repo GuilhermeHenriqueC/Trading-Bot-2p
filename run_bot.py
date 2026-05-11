@@ -29,6 +29,7 @@ TRADE_STEP = ("Paper trade", "paper_trade.py")
 MARKET_TZ = ZoneInfo("America/New_York")
 MARKET_OPEN = dt_time(9, 30)
 MARKET_CLOSE = dt_time(16, 0)
+FORCE_SELL_TIME = dt_time(15, 55)
 DEFAULT_CHECK_SECONDS = 60
 
 load_dotenv()
@@ -103,6 +104,16 @@ def market_is_open():
 
     current_time = now.time()
     return MARKET_OPEN <= current_time <= MARKET_CLOSE
+
+
+def should_force_sell_before_close():
+    now = datetime.now(MARKET_TZ)
+
+    if now.weekday() >= 5:
+        return False
+
+    current_time = now.time()
+    return FORCE_SELL_TIME <= current_time <= MARKET_CLOSE
 
 
 # ==== NEW: Trade state and filtering logic ====
@@ -190,6 +201,12 @@ def run_signal_check():
 
 
 def run_manual_mode():
+    if should_force_sell_before_close():
+        print("\nForce-sell window reached. Running paper_trade.py to close all open positions.")
+        run_step(*TRADE_STEP)
+        print("\nClose-time sell check finished.")
+        return
+
     run_pre_trade_steps()
     buy_signals = run_signal_check()
 
@@ -220,6 +237,12 @@ def run_auto_mode(check_seconds):
     print(f"Already traded today: {sorted(traded_tickers) if traded_tickers else 'none'}")
 
     while market_is_open():
+        if should_force_sell_before_close():
+            print("\nForce-sell window reached. Running paper_trade.py to close all open positions.")
+            run_step(*TRADE_STEP)
+            print("\nClose-time sell check finished. Auto mode stopped for today.")
+            return
+
         traded_state = load_traded_state()
         traded_tickers = set(traded_state.get("tickers", []))
 

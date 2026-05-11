@@ -12,8 +12,9 @@ PERIOD = "5d"
 DROP_TRIGGER = -0.01
 VOLUME_MULTIPLIER = 1.2
 MIN_WIN_RATE = 55
-MIN_TRADES = 5
+MIN_TRADES = 3
 MIN_TOTAL_RETURN = 0
+MAX_SIGNALS_TO_CHECK = 15
 TAKE_PROFIT = 0.02
 STOP_LOSS = -0.02
 
@@ -150,6 +151,13 @@ def main():
     if candidates.empty:
         write_empty_signals("No candidates passed paper signal requirements.")
         return
+
+    candidates = candidates.sort_values(
+        ["win_rate", "total_return", "average_return", "trades"],
+        ascending=[False, False, False, False],
+    ).head(MAX_SIGNALS_TO_CHECK)
+
+    print(f"Checking top {len(candidates)} live candidates out of {MAX_SIGNALS_TO_CHECK} max.")
 
     signals = []
 

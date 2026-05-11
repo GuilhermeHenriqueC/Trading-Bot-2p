@@ -1,5 +1,5 @@
 .env
-/Data/*.csv
+*.csv
 logs/
 venv/
 __pycache__/
